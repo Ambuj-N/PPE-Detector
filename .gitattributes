@@ -1,0 +1,6 @@
+ppe_records.db filter=lfs diff=lfs merge=lfs -text
+ppe_face_db.sqlite3 filter=lfs diff=lfs merge=lfs -text
+ppe_violations.db filter=lfs diff=lfs merge=lfs -text
+output.mp4 filter=lfs diff=lfs merge=lfs -text
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.mov filter=lfs diff=lfs merge=lfs -text
