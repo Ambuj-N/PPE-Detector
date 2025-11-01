@@ -59,6 +59,10 @@ except ImportError:
 # --- Face recognition & DB imports ---
 FACE_RECOGNITION_AVAILABLE = True
 try:
+    # NOTE: If running this locally, you must first install the dlib dependency:
+    # pip install cmake
+    # pip install dlib
+    # Then install face_recognition: pip install face_recognition
     import face_recognition
 except Exception as e:
     FACE_RECOGNITION_AVAILABLE = False
@@ -217,8 +221,7 @@ with st.sidebar.expander("Register New Employee"):
     emp_name = st.text_input("Employee Name", key="reg_name")
     # If face_recognition not available, show message
     if not FACE_RECOGNITION_AVAILABLE:
-        st.warning("Face recognition dependency missing. Install `face_recognition` (and its dlib dependency).")
-        st.caption(f"Error: {_face_error}")
+        st.warning(f"Face recognition disabled: {_face_error}. Please install `face_recognition` and its dlib dependency if running locally.")
     else:
         reg_image = st.camera_input("Capture Face (clean, front-facing)")
         
@@ -294,11 +297,12 @@ with tab1:
     st.markdown("### 🔴 Live Capture (Camera)")
     st.caption("Capture a live picture; the app will identify the user (if registered) and check PPE.")
 
-    live_img = None
-    if FACE_RECOGNITION_AVAILABLE:
-        live_img = st.camera_input("Take a live photo")
-    else:
-        st.info("Face recognition disabled — live identification is not available.")
+    # --- FIX: Show st.camera_input unconditionally to allow PPE analysis even if Face ID fails on deployment ---
+    live_img = st.camera_input("Take a live photo") 
+
+    if not FACE_RECOGNITION_AVAILABLE:
+        st.info("⚠️ **Face Identification is Disabled.** The app can still capture and check PPE, but it cannot identify registered employees or log by name because the `face_recognition` dependency could not load on the web platform.")
+    # --- END FIX ---
 
     if live_img:
         with st.spinner("Analyzing live capture..."):
@@ -313,9 +317,13 @@ with tab1:
                 known_names = [reg[e][0] for e in known_emp_ids] if known_emp_ids else []
 
                 # --- NEW MULTI-PERSON FACE IDENTIFICATION ---
-                # Find all faces and identify them
-                face_locations = face_recognition.face_locations(img_np) if FACE_RECOGNITION_AVAILABLE else []
-                face_encodings = face_recognition.face_encodings(img_np, face_locations) if FACE_RECOGNITION_AVAILABLE else []
+                # Only attempt face detection/encoding if the module loaded successfully
+                if FACE_RECOGNITION_AVAILABLE:
+                    face_locations = face_recognition.face_locations(img_np)
+                    face_encodings = face_recognition.face_encodings(img_np, face_locations)
+                else:
+                    face_locations = []
+                    face_encodings = []
 
                 identified_persons = [] # Stores dicts: {"id":..., "name":..., "score":...}
 
