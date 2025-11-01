@@ -1,0 +1,5 @@
+# packages.txt
+libgl1-mesa-glx
+libgconf-2-4
+libsm6
+libxext6
