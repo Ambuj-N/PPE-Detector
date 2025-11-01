@@ -8,6 +8,15 @@ import altair as alt
 from pathlib import Path
 import io
 import datetime
+import base64
+
+# --- Helper function to encode image ---
+def get_image_as_base64(path):
+    try:
+        with open(path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    except FileNotFoundError:
+        return None
 
 # --- FIX 1: Import type hints ---
 from typing import Optional, List 
@@ -72,18 +81,40 @@ except ImportError:
 EXAMPLE_IMAGE_PATH = "example_ppe.jpg"
 
 st.set_page_config(
-    page_title="PPE Detector",
+    page_title="APECS",
     layout="wide",
     initial_sidebar_state="expanded",
-    page_icon="🦺"
+    page_icon="logo.png"
 )
 
-st.title("🦺 PPE Detection Pro")
-st.markdown("AI-Powered Personal Protective Equipment Monitoring System")
+# --- Load and encode the logo image ---
+logo_base64 = get_image_as_base64("logo.png")
+
+# --- Set the HTML title with embedded logo ---
+if logo_base64:
+    st.markdown(f"""
+    <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 2rem; margin-top: 25px;">
+        <img src="data:image/png;base64,{logo_base64}" alt="APECS Logo" style="height: 200px; margin-right: 20px; transform: translateY(10px); /* Adjust this value to move the image up or down */">
+        <div>
+            <h1 style="font-weight:bold; color:#FFFFFF; font-size:3rem; margin: 0;">APECS</h1>
+            <h3 style="color:#FFFFF; margin: 0;">Automated PPE Enforcement & Compliance System</h3>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown("""
+    <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 2rem;">
+        <span style="font-size: 4rem; margin-right: 20px;">🦺</span>
+        <div>
+            <h1 style="font-weight:bold; color:#2E86C1; font-size:3rem; margin: 0;">APECS</h1>
+            <h3 style="color:#5D6D7E; margin: 0;">Automated PPE Enforcement & Compliance System</h3>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 with st.expander("👋 Welcome! Meet the Development Team", expanded=False):
     st.markdown("""
-    **Welcome to PPE Detector Pro!** This app uses AI to monitor workplace safety.
+    **Welcome to APECS!** This app uses AI to monitor workplace safety.
 
     Developed by students from **IIT (BHU) Varanasi**:
     - **Ambuj Nayak** ([GitHub](https://github.com/Ambuj-N))
@@ -253,7 +284,7 @@ def df_from_counts(counts: dict, selected_items: list) -> pd.DataFrame:
     return pd.DataFrame(data).sort_values("Missing Count", ascending=False) if data else pd.DataFrame()
 
 # ---------------- Main layout: Tabs ----------------
-tab1, tab2, tab3 = st.tabs(["📷 Image Analysis", "🎥 Video Analysis", "📜 History"])
+tab1, tab2, tab3, tab4 = st.tabs(["📷 Image Analysis", "🎥 Video Analysis","📊 Analytics & Documentation","📜 History"])
 
 # ---------------- Tab 1: Image Analysis ----------------
 with tab1:
@@ -498,9 +529,75 @@ with tab2:
                     Path(input_path).unlink()
                 except Exception:
                     pass
-
-# ---------------- Tab 3: History ----------------
+# ---------------- ANALYTICS TAB ----------------
 with tab3:
+    st.markdown('<div class="section-header">📊 Analytics & Documentation</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        ### 🎯 How It Works
+        
+        1. **🆔 Register Employee**: Use the sidebar to register an employee with their ID, name, and face.
+        2. **📸 Capture or Upload**: Use the live camera or upload an image/video.
+        3. **🔍 AI Analysis**: The system performs two key tasks:
+            - **Identifies** the person using face recognition.
+            - **Detects** all required PPE items.
+        4. **🚨 Log & Alert**: If a violation occurs:
+            - It's logged in the **History** tab with a snapshot.
+            - An instant **Telegram notification** is sent.
+        5. **📊 Review**: Check the dashboard for compliance rates and view detailed violation history.
+        
+        ### 🛡️ Monitored PPE Items
+        
+        This system automatically monitors all of the following PPE:
+        """)
+        for item in FIXED_DETECTION_ITEMS:
+            st.markdown(f"- 🔹 **{item.title()}**")
+    
+    with col2:
+        st.markdown("""
+        ### ⚙️ Technology Stack
+        
+        - **PPE Models**: YOLOv9e (General) & Custom YOLO (Vests)
+        - **Face Recognition**: `face_recognition` (dlib)
+        - **Framework**: Streamlit & Ultralytics
+        - **Database**: Local SQLite for history
+        - **Notifications**: Telegram Bot API
+        
+        ### 🎨 Core Features
+        
+        - ✨ **Real-time** detection via camera
+        - 🆔 **Employee Identification** via face recognition
+        - 🔔 **Instant Alerts** on Telegram for violations
+        - 📜 **Persistent History** with violation snapshots
+        - 👥 **Multi-person** detection and identification
+        - 📊 Detailed compliance metrics
+        
+        ### 💡 Tips
+        
+        - For best face recognition, register users with clear, front-facing photos.
+        - The confidence threshold affects PPE detection; higher values reduce false positives.
+        - Check the "History" tab to review past incidents.
+        """)
+    
+    st.markdown("---")
+    st.markdown("""
+    ### 🧑‍💻 Development Team
+    
+    **Created by:**
+    - **Ambuj Nayak** - [GitHub](https://github.com/Ambuj-N) - [24074007]
+    - **Paturi Hemanth Sai** - [24075065]
+    - **Ankit Raj** - [24074011]
+    - **Jalla Poojitha** - [24124022]
+    
+    **Institution**: Indian Institute of Technology (BHU) Varanasi
+    
+    **Purpose**: Enhancing workplace safety through AI-powered PPE compliance monitoring.
+    """)
+# ---------------- Tab 3: History ----------------
+with tab4:
     st.header("📜 Violation History (recent)")
     st.caption("Shows recent violations (who, when, what was missing). Uses local SQLite storage.")
 
@@ -545,6 +642,6 @@ with tab3:
 st.markdown("---")
 st.markdown(
     """
-    Built with ❤️ using YOLO & Streamlit | [@Ambuj-N](https://github.com/Ambuj-N) | IIT BHU 🎓
+    Built with ❤️ using YOLO & Streamlit | [@Ambuj-N](https://github.com/Ambuj-N) | IIT BHU 🎓 | APECS
     """
 )
