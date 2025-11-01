@@ -1,4 +1,4 @@
-streamlit==1.26.0
+streamlit==1.27.0
 
 # PyTorch Ecosystem: Must be compatible with each other and the Python environment (e.g., Python 3.10+)
 # torch 2.5.0 requires newer torchvision/torchaudio.
