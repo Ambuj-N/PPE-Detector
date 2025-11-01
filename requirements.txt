@@ -4,7 +4,7 @@ streamlit==1.26.0
 # torch 2.5.0 requires newer torchvision/torchaudio.
 torch==2.5.0
 torchvision==0.24.0   # Updated from 0.16.0 to a version compatible with torch 2.5.0
-torchaudio==2.5.0    # Updated from 2.1.0 to match the torch 2.5.0 version
+torchaudiotorchaudio>=2.6.0    # Updated from 2.1.0 to match the torch 2.5.0 version
 
 # Core dependencies (ensuring compatibility with Python environment)
 ultralytics>=8.1.3
