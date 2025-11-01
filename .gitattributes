@@ -1,3 +1,5 @@
+*.sqlite3 filter=lfs diff=lfs merge=lfs -text
+*.db filter=lfs diff=lfs merge=lfs -text
 ppe_records.db filter=lfs diff=lfs merge=lfs -text
 ppe_face_db.sqlite3 filter=lfs diff=lfs merge=lfs -text
 ppe_violations.db filter=lfs diff=lfs merge=lfs -text

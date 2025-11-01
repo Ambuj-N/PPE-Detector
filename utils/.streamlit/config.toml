@@ -1,0 +1,15 @@
+[theme]
+# Primary color for buttons, links, etc. (Safety Orange/Yellow for emphasis)
+primaryColor = "#FF8C00" 
+
+# Background color of the main page (Clean White)
+backgroundColor = "#FFFFFF"
+
+# Background color of the sidebar and expanders (Dark Navy for professional contrast)
+secondaryBackgroundColor = "#0C2340" 
+
+# Font color of the app (Dark Gray for readability)
+textColor = "#333333"
+
+# Font type
+font = "sans serif"
