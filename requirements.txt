@@ -8,3 +8,4 @@ Pillow<10
 pandas>=1.5.0
 huggingface-hub>=0.20.0
 altair>=4.2.0
+python-telegram-bot
