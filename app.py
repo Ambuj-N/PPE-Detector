@@ -9,8 +9,13 @@ from pathlib import Path
 import io
 import datetime
 import base64
+from typing import Optional, List 
+import asyncio 
+import requests
+import telegram 
 
-# --- Helper function to encode image ---
+# --- UTILITY FUNCTIONS ---
+
 def get_image_as_base64(path):
     try:
         with open(path, "rb") as img_file:
@@ -18,68 +23,55 @@ def get_image_as_base64(path):
     except FileNotFoundError:
         return None
 
-# --- FIX 1: Import type hints ---
-from typing import Optional, List 
-# --- FIX 3: Import for asynchronous handling ---
-import asyncio 
-
-# --- Telegram Imports ---
-import requests
-import telegram 
-# --- FIX 2: Import constants for ParseMode ---
 try:
     from telegram import constants
 except ImportError:
-    # Fallback to prevent crash if constants import fails
     class DummyConstants:
         class ParseMode:
             HTML = 'HTML'
     constants = DummyConstants()
 
-# You might need to install 'python-telegram-bot' separately
 try:
-    # Dummy module setup to prevent crash if telegram is missing
     if not hasattr(telegram, 'Bot'):
         class DummyBot:
             def __init__(self, *args, **kwargs): pass
-            def send_photo(self, *args, **kwargs): raise RuntimeError("Telegram not installed.")
+            async def send_photo(self, *args, **kwargs): raise RuntimeError("Telegram not installed.")
         telegram.Bot = DummyBot
 except Exception:
     pass
 
-
-# --- PPE detection imports (your existing utils/detect.py) ---
 try:
-    # NOTE: You will need to modify these functions in utils/detect.py
     from utils.detect import detect_ppe_image, detect_ppe_video, load_model, get_model_labels
 except ImportError:
     st.error("Fatal Error: `utils/detect.py` not found. Please ensure it's in the same directory.")
     st.stop()
 
-# --- Face recognition & DB imports ---
+
 FACE_RECOGNITION_AVAILABLE = True
 try:
-    # NOTE: If running this locally, you must first install the dlib dependency:
-    # pip install cmake
-    # pip install dlib
-    # Then install face_recognition: pip install face_recognition
     import face_recognition
 except Exception as e:
     FACE_RECOGNITION_AVAILABLE = False
     _face_error = e
 
-# utils/face_db provides register_employee, load_all_encodings, log_violation, get_violation_count, get_recent_violations
+
 try:
     from utils.face_db import (
         register_employee,
         load_all_encodings,
         log_violation,
         get_violation_count,
-        get_recent_violations
+        get_recent_violations,
+        delete_violation_entry, 
+        delete_employee
     )
 except ImportError:
     st.error("Fatal Error: `utils/face_db.py` not found. Please create it (see instructions).")
     st.stop()
+except NameError:
+    def delete_violation_entry(id): st.warning(f"DB stub: Delete violation {id} logic not implemented.")
+    def delete_employee(emp_id): st.warning(f"DB stub: Delete employee {emp_id} logic not implemented.")
+    st.warning("⚠️ Warning: Admin delete functions are not yet defined in `utils/face_db.py`.")
 
 
 EXAMPLE_IMAGE_PATH = "example_ppe.jpg"
@@ -91,14 +83,14 @@ st.set_page_config(
     page_icon="logo.png"
 )
 
-# --- Load and encode the logo image ---
+
 logo_base64 = get_image_as_base64("logo.png")
 
-# --- Set the HTML title with embedded logo ---
+
 if logo_base64:
     st.markdown(f"""
     <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 2rem; margin-top: 25px;">
-        <img src="data:image/png;base64,{logo_base64}" alt="APECS Logo" style="height: 200px; margin-right: 20px; transform: translateY(10px); /* Adjust this value to move the image up or down */">
+        <img src="data:image/png;base64,{logo_base64}" alt="APECS Logo" style="height: 200px; margin-right: 20px; transform: translateY(10px); ">
         <div>
             <h1 style="font-weight:bold; color:#FFFFFF; font-size:3rem; margin: 0;">APECS</h1>
             <h3 style="color:#FFFFF; margin: 0;">Automated PPE Enforcement & Compliance System</h3>
@@ -128,11 +120,11 @@ with st.expander("👋 Welcome! Meet the Development Team", expanded=False):
     """)
 
 
-# ---------------- TELEGRAM NOTIFICATION FUNCTION ----------------
+# --- TELEGRAM SETUP ---
+
 BOT_TOKEN = "8258711886:AAGUwUmWsyrfHWpAWnhgieEL9ESobk_NsAs"
 CHAT_ID = "1269174608"
 
-# V V V FIX 3: ADD 'async' V V V
 async def send_violation_notification(emp_id: Optional[str], name: Optional[str], missing_items: List[str], img_bytes: bytes):
     """Sends a violation alert to a Telegram chat."""
     
@@ -144,7 +136,7 @@ async def send_violation_notification(emp_id: Optional[str], name: Optional[str]
     id_str = emp_id or "N/A"
     missing_str = ", ".join(missing_items)
     
-    # Format the message (supports HTML)
+    
     message = (
         f"<b>🚨 PPE VIOLATION DETECTED 🚨</b>\n\n"
         f"<b>Name:</b> {name_str}\n"
@@ -155,12 +147,11 @@ async def send_violation_notification(emp_id: Optional[str], name: Optional[str]
     try:
         bot = telegram.Bot(token=BOT_TOKEN)
         
-        # Prepare image bytes for sending
+        
         image_file = io.BytesIO(img_bytes)
         image_file.name = "violation.png"
         image_file.seek(0)
         
-        # V V V FIX 3: ADD 'await' V V V
         await bot.send_photo(
             chat_id=CHAT_ID,
             photo=image_file,
@@ -172,35 +163,30 @@ async def send_violation_notification(emp_id: Optional[str], name: Optional[str]
         print(f"Failed to send Telegram notification: {e}")
         st.toast(f"Failed to send notification: {e}", icon="❌") 
 
-# ---------------- End of TELEGRAM NOTIFICATION FUNCTION ----------------
 
+# --- MODEL LOADING ---
 
-# ---------------- Sidebar: configuration & model selection ----------------
-st.sidebar.header("⚙️ Configuration")
-
-# --- Load Models ---
 @st.cache_resource
 def load_all_models():
     """Caches both models to prevent reloading."""
-    # model_main is for helmet, gloves, glasses, shoes
     model_main, labels_main = load_model("yolo9e.pt"), get_model_labels("yolo9e.pt")
-    # model_vest is for vest only
     model_vest, labels_vest = load_model("best.pt"), get_model_labels("best.pt")
     return (model_main, labels_main), (model_vest, labels_vest)
 
 try:
     (model_main, labels_main), (model_vest, labels_vest) = load_all_models()
-    st.sidebar.success("✅ All models (yolo9e.pt, best.pt) loaded.")
 except Exception as e:
-    st.sidebar.error(f"Fatal: Failed loading models: {e}")
+    st.sidebar.header("⚠️ Fatal Error")
+    st.sidebar.error(f"Failed loading models (yolo9e.pt, best.pt): {e}. Application cannot start.")
     st.stop()
 
-# --- Hardcoded Detection Items ---
-# All items that must be detected
+
+# --- SIDEBAR CONFIGURATION ---
+
+st.sidebar.header("⚙️ Configuration") 
+
 FIXED_DETECTION_ITEMS = ["helmet", "vest", "gloves", "glasses", "shoes"]
-# Items for the main model (yolo9e.pt)
 ITEMS_MAIN_MODEL = ["helmet", "gloves", "glasses", "shoes"]
-# Items for the vest model (best.pt)
 ITEMS_VEST_MODEL = ["vest"]
 
 st.sidebar.subheader("Detection Settings")
@@ -210,16 +196,16 @@ confidence_threshold = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, 0.5, 
 
 if st.sidebar.button("🔄 Clear Session & Reset"):
     st.session_state.clear()
-    st.rerun()
+    st.experimental_rerun() 
 
-# ---------------- Face registration UI (sidebar) ----------------
+
 st.sidebar.subheader("🆔 Face Registration")
 st.sidebar.info("Register employee face once. Stored locally.")
 
 with st.sidebar.expander("Register New Employee"):
     emp_id = st.text_input("Employee ID (unique)", key="reg_empid")
     emp_name = st.text_input("Employee Name", key="reg_name")
-    # If face_recognition not available, show message
+    
     if not FACE_RECOGNITION_AVAILABLE:
         st.warning(f"Face recognition disabled: {_face_error}. Please install `face_recognition` and its dlib dependency if running locally.")
     else:
@@ -241,24 +227,57 @@ with st.sidebar.expander("Register New Employee"):
         elif reg_image:
              st.warning("Please enter Employee ID and Name to register.")
 
-# Employee quick lookup
-st.sidebar.subheader("🔎 Employee Quick Lookup")
-lookup_empid = st.sidebar.text_input("Employee ID to lookup", key="lookup_empid")
-if st.sidebar.button("Lookup Violations"):
-    if lookup_empid:
-        count = get_violation_count(lookup_empid.strip())
-        st.sidebar.info(f"Total recorded violations for {lookup_empid.strip()}: {count}")
-        all_hist = get_recent_violations(200)
-        emp_hist = [h for h in all_hist if h['employee_id'] == lookup_empid.strip()]
-        if emp_hist:
-            for h in emp_hist[:10]:
-                st.sidebar.write(f"{h['timestamp']}: {h['missing_items']}")
-        else:
-            st.sidebar.write("No recorded violations for this employee.")
-    else:
-        st.sidebar.warning("Enter an Employee ID.")
 
-# ---------------- Helper UI functions ----------------
+st.sidebar.subheader("🔎 Employee Quick Lookup")
+lookup_query = st.sidebar.text_input("Search by ID or Name", key="lookup_query")
+if st.sidebar.button("Lookup Violations"):
+    query = lookup_query.strip()
+    if query:
+        
+        reg_data = load_all_encodings()
+        
+        target_id = None
+        target_name = None
+        
+        
+        if query in reg_data:
+            target_id = query
+            target_name = reg_data[query][0]
+        
+        else:
+            for emp_id, (name, _) in reg_data.items():
+                if name.strip().lower() == query.lower():
+                    target_id = emp_id
+                    target_name = name
+                    break
+
+        if target_id or (target_id is None and query.lower() == "unknown"): 
+            
+            search_id = target_id if target_id else None
+            
+            count = get_violation_count(search_id)
+            lookup_label = target_name if target_name else query
+            
+            st.sidebar.info(f"Total recorded violations for **{lookup_label}** (ID: {search_id or 'N/A'}): **{count}**")
+            
+            all_hist = get_recent_violations(200)
+            emp_hist = [h for h in all_hist if (h['employee_id'] == search_id and h['employee_id'] is not None) or (h['employee_id'] is None and search_id is None)]
+            
+            if emp_hist:
+                st.sidebar.write("Recent Violations:")
+                for h in emp_hist[:10]: 
+                    ts = h['timestamp'].split('T')[0] if h['timestamp'] else 'N/A'
+                    st.sidebar.markdown(f"• {ts}: {', '.join(h['missing_items'])}")
+            else:
+                st.sidebar.write("No recorded violations found.")
+        else:
+            st.sidebar.warning(f"Employee ID or Name '{query}' not found in registry.")
+    else:
+        st.sidebar.warning("Enter an Employee ID or Name.")
+
+
+# --- METRICS AND CHARTING FUNCTIONS ---
+
 def display_metrics(person_count, total_violators, missing_counts, selected_items):
     """Displays the key metrics in columns."""
     col1, col2, col3 = st.columns(3)
@@ -286,23 +305,31 @@ def df_from_counts(counts: dict, selected_items: list) -> pd.DataFrame:
     data = [{"PPE Item": k, "Missing Count": v} for k, v in counts.items() if k in FIXED_DETECTION_ITEMS and v > 0]
     return pd.DataFrame(data).sort_values("Missing Count", ascending=False) if data else pd.DataFrame()
 
-# ---------------- Main layout: Tabs ----------------
-tab1, tab2, tab3, tab4 = st.tabs(["📷 Image Analysis", "🎥 Video Analysis","📊 Analytics & Documentation","📜 History"])
 
-# ---------------- Tab 1: Image Analysis ----------------
+# --- TAB DEFINITION (MODIFIED) ---
+
+tab1, tab2, tab3, tab_history, tab_admin = st.tabs([
+    "📷 Image Analysis", 
+    "🎥 Video Analysis",
+    "📊 Analytics & Documentation",
+    "📜 History Log", # Public access tab
+    "🔑 Admin Panel" # Restricted access tab
+])
+
+
+# --- IMAGE ANALYSIS TAB (UNCHANGED) ---
+
 with tab1:
     st.header("📷 Image Analysis")
 
-    # Live capture block
+    
     st.markdown("### 🔴 Live Capture (Camera)")
     st.caption("Capture a live picture; the app will identify the user (if registered) and check PPE.")
 
-    # --- FIX: Show st.camera_input unconditionally to allow PPE analysis even if Face ID fails on deployment ---
     live_img = st.camera_input("Take a live photo") 
 
     if not FACE_RECOGNITION_AVAILABLE:
         st.info("⚠️ **Face Identification is Disabled.** The app can still capture and check PPE, but it cannot identify registered employees or log by name because the `face_recognition` dependency could not load on the web platform.")
-    # --- END FIX ---
 
     if live_img:
         with st.spinner("Analyzing live capture..."):
@@ -310,14 +337,13 @@ with tab1:
                 img_pil = Image.open(live_img).convert("RGB")
                 img_np = np.array(img_pil)
 
-                # Load registered encodings
+                
                 reg = load_all_encodings()  # dict: emp_id -> (name, enc)
                 known_emp_ids = list(reg.keys())
                 known_encodings = [reg[e][1] for e in known_emp_ids] if known_emp_ids else []
                 known_names = [reg[e][0] for e in known_emp_ids] if known_emp_ids else []
 
-                # --- NEW MULTI-PERSON FACE IDENTIFICATION ---
-                # Only attempt face detection/encoding if the module loaded successfully
+                
                 if FACE_RECOGNITION_AVAILABLE:
                     face_locations = face_recognition.face_locations(img_np)
                     face_encodings = face_recognition.face_encodings(img_np, face_locations)
@@ -329,7 +355,6 @@ with tab1:
 
                 if face_encodings and known_encodings:
                     for unknown_encoding in face_encodings:
-                        # Compare this unknown face to all known encodings
                         matches = face_recognition.compare_faces(known_encodings, unknown_encoding, tolerance=0.5)
                         face_distances = face_recognition.face_distance(known_encodings, unknown_encoding)
                         
@@ -337,10 +362,8 @@ with tab1:
                         matched_name = "Unknown"
                         match_score = None
 
-                        # Find the best match (if any)
                         if True in matches:
                             best_idx = int(np.argmin(face_distances))
-                            # Ensure the best match is within tolerance
                             if face_distances[best_idx] <= 0.5: 
                                 matched_employee_id = known_emp_ids[best_idx]
                                 matched_name = known_names[best_idx]
@@ -351,17 +374,16 @@ with tab1:
                             "name": matched_name,
                             "score": match_score
                         })
-                elif face_encodings: # Faces detected, but no known encodings to compare against
+                elif face_encodings: 
                     for _ in face_encodings:
                         identified_persons.append({"id": None, "name": "Unknown", "score": None})
 
-                # Get names for caption
                 all_identified_names = [p["name"] for p in identified_persons]
                 if not all_identified_names:
                     all_identified_names = ["No faces detected"]
                 
                 
-                # --- MODIFIED FUNCTION CALL ---
+                
                 img_annot, missing_counts, violators, persons, detection_summary = detect_ppe_image(
                     img_pil,
                     required_items=FIXED_DETECTION_ITEMS,
@@ -374,41 +396,31 @@ with tab1:
                     model_vest_labels=labels_vest
                 )
 
-                # Save snapshot bytes (PNG) for history
+                
                 buf = io.BytesIO()
                 img_annot.save(buf, format="PNG")
                 img_bytes = buf.getvalue()
 
-                # --- NEW MULTI-PERSON LOGGING AND UI ---
-                # Determine missing items
+                
                 missing_list = [k for k, v in missing_counts.items() if v > 0]
 
-                # Log violation and SEND NOTIFICATION if any missing items found
                 if missing_list:
                     if identified_persons:
-                        # Log a separate violation for EACH identified person
                         for person in identified_persons:
-                            # NOTE: This logs the AGGREGATE missing list for each person.
                             log_violation(person["id"], person["name"], missing_list, img_bytes)
                             
-                            # V V V FIX 3: USE asyncio.run() V V V
                             asyncio.run(
                                 send_violation_notification(person["id"], person["name"], missing_list, img_bytes)
                             )
-                            # ^ ^ ^ ^ ^ ^ ^ ^
                             
                     elif violators > 0:
-                        # Log one violation for "Unknown" if no faces were identified
                         log_violation(None, "Unknown", missing_list, img_bytes)
                         
-                        # V V V FIX 3: USE asyncio.run() V V V
                         asyncio.run(
                             send_violation_notification(None, "Unknown", missing_list, img_bytes)
                         )
-                        # ^ ^ ^ ^ ^ ^ ^ ^
 
-
-                # UI: show results
+                
                 caption_text = f"Identified: {', '.join(all_identified_names)}"
                 st.image(img_annot, use_column_width=True, caption=caption_text)
 
@@ -431,11 +443,11 @@ with tab1:
             
             except Exception as e:
                 st.error(f"Live capture error: {e}")
-                st.exception(e) # Show full error
+                st.exception(e)
 
     st.markdown("---")
 
-    # Existing upload flow
+    
     uploaded_img = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png"])
     st.markdown("---")
     if st.button("🚀 Try Example Image (Demo)"):
@@ -451,7 +463,6 @@ with tab1:
     if uploaded_img:
         with st.spinner("🔍 Analyzing image..."):
             try:
-                # --- MODIFIED FUNCTION CALL ---
                 img, missing, violators, persons, _ = detect_ppe_image(
                     uploaded_img,
                     required_items=FIXED_DETECTION_ITEMS,
@@ -482,9 +493,10 @@ with tab1:
                         st.altair_chart(chart, use_container_width=True)
             except Exception as e:
                 st.error(f"An error occurred during image processing: {e}")
-                st.exception(e) # Show full error
+                st.exception(e)
 
-# ---------------- Tab 2: Video Analysis ----------------
+# --- VIDEO ANALYSIS TAB (UNCHANGED) ---
+
 with tab2:
     st.header("🎥 Video Analysis")
     uploaded_vid = st.file_uploader("Upload Video", type=["mp4", "mov", "avi"])
@@ -505,7 +517,6 @@ with tab2:
 
             with st.spinner(f"Analyzing video (this may take a while)..."):
                 
-                # --- MODIFIED FUNCTION CALL ---
                 out_path, missing, violators, persons, _ = detect_ppe_video(
                     input_path, "output.mp4",
                     required_items=FIXED_DETECTION_ITEMS,
@@ -528,8 +539,8 @@ with tab2:
 
         except Exception as e:
             st.error(f"An error occurred during video processing: {e}")
-            st.exception(e) # Show full error
-            if 'progress' in locals():
+            st.exception(e)
+            if 'input_path' in locals():
                 progress.empty()
         finally:
             if 'input_path' in locals() and Path(input_path).exists():
@@ -537,7 +548,9 @@ with tab2:
                     Path(input_path).unlink()
                 except Exception:
                     pass
-# ---------------- ANALYTICS TAB ----------------
+
+# --- ANALYTICS TAB (UNCHANGED) ---
+
 with tab3:
     st.markdown('<div class="section-header">📊 Analytics & Documentation</div>', unsafe_allow_html=True)
     
@@ -553,7 +566,7 @@ with tab3:
             - **Identifies** the person using face recognition.
             - **Detects** all required PPE items.
         4. **🚨 Log & Alert**: If a violation occurs:
-            - It's logged in the **History** tab with a snapshot.
+            - It's logged in the **History Log** tab with a snapshot.
             - An instant **Telegram notification** is sent.
         5. **📊 Review**: Check the dashboard for compliance rates and view detailed violation history.
         
@@ -571,7 +584,7 @@ with tab3:
         - **PPE Models**: YOLOv9e (General) & Custom YOLO (Vests)
         - **Face Recognition**: `face_recognition` (dlib)
         - **Framework**: Streamlit & Ultralytics
-        - **Database**: Local SQLite for history
+        - **Database**: Local SQLite for history (See Admin tab for security notes)
         - **Notifications**: Telegram Bot API
         
         ### 🎨 Core Features
@@ -587,7 +600,7 @@ with tab3:
         
         - For best face recognition, register users with clear, front-facing photos.
         - The confidence threshold affects PPE detection; higher values reduce false positives.
-        - Check the "History" tab to review past incidents.
+        - Check the **Admin Panel** tab for full audit logs and data management.
         """)
     
     st.markdown("---")
@@ -604,48 +617,164 @@ with tab3:
     
     **Purpose**: Enhancing workplace safety through AI-powered PPE compliance monitoring.
     """)
-# ---------------- Tab 3: History ----------------
-with tab4:
-    st.header("📜 Violation History (recent)")
-    st.caption("Shows recent violations (who, when, what was missing). Uses local SQLite storage.")
+
+
+# --- ADMIN CREDENTIAL SETUP ---
+
+try:
+    ADMIN_USER = st.secrets["admin_credentials"]["username"]
+    ADMIN_PASS = st.secrets["admin_credentials"]["password"]
+except KeyError:
+    st.error("FATAL ERROR: Admin credentials not found in `.streamlit/secrets.toml`. Please create and format it correctly.")
+    ADMIN_USER = ""
+    ADMIN_PASS = ""
+
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+
+
+# --- HISTORY LOG (PUBLIC ACCESS) ---
+
+with tab_history:
+    st.header("📜 History Log")
+
+    # --- VIOLATION HISTORY DISPLAY (PUBLIC READ) ---
+    st.markdown("## Violation History Audit Log")
+    st.caption("Shows all recent violations with snapshots. **Deletion is restricted to Admin users.**")
 
     hist_rows = get_recent_violations(limit=200)
+    
     if not hist_rows:
         st.info("No violation history yet.")
     else:
-        # Present as a table with expanders for images/details
+        # Present as a table for quick overview
         df_list = []
         for row in hist_rows:
             df_list.append({
-                "id": row['id'],
-                "employee_id": row['employee_id'] or "Unknown",
-                "name": row['name'] or "Unknown",
-                "timestamp": row['timestamp'],
-                "missing_items": ", ".join(row['missing_items'])
+                "ID": row['id'],
+                "Employee ID": row['employee_id'] or "Unknown",
+                "Name": row['name'] or "Unknown",
+                "Timestamp": row['timestamp'],
+                "Missing Items": ", ".join(row['missing_items'])
             })
         history_df = pd.DataFrame(df_list)
-        st.dataframe(history_df.sort_values("timestamp", ascending=False))
+        st.dataframe(history_df.sort_values("Timestamp", ascending=False))
 
         st.markdown("---")
-        st.subheader("Recent entries (with snapshots)")
+        st.subheader("Detailed Entries (with Snapshots)")
+        
+        # Display detailed entries with images and conditional delete buttons
         for row in hist_rows[:50]:
+            col1, col2, col3 = st.columns([0.5, 0.3, 0.2])
+            
             ts = row['timestamp'] or ""
             name = row['name'] or "Unknown"
             emp_id_row = row['employee_id'] or "Unknown"
             missing_str = ", ".join(row['missing_items']) if row['missing_items'] else "None"
-            col1, col2 = st.columns([0.7, 0.3])
+            
             with col1:
-                st.markdown(f"**{name}** — ID: `{emp_id_row}`")
+                st.markdown(f"**{name}** — ID: `{emp_id_row}` (DB ID: `{row['id']}`)")
                 st.caption(ts.replace("T", " ") if ts else "")
                 st.markdown(f"**Missing:** {missing_str}")
+                
             with col2:
                 if row['image_blob']:
                     try:
-                        st.image(row['image_blob'], width=220)
+                        st.image(row['image_blob'], width=220, caption="Violation Snapshot")
                     except Exception:
                         st.text("Image cannot be displayed.")
+                else:
+                     st.text("No image saved.")
+            
+            with col3:
+                # --- ACCESS CONTROL FOR DELETION ---
+                is_admin = st.session_state.authenticated
+                if is_admin:
+                    if st.button("Delete Entry", key=f"del_viol_{row['id']}"):
+                        delete_violation_entry(row['id'])
+                        st.toast(f"Violation ID {row['id']} deleted!", icon="🗑️")
+                        st.experimental_rerun()
+                else:
+                    # Non-admin users see a disabled-style button and get a warning on click
+                    if st.button("Delete Entry (Admin Only)", key=f"del_viol_{row['id']}_public"):
+                        st.warning("🚨 **Admin Access Required.** Please use the **Admin Panel** tab to log in and gain deletion permissions.")
+                    
             st.markdown("---")
 
+    # --- EMPLOYEE DATABASE (PUBLIC READ) ---
+    st.markdown("## 🆔 Registered Employee Database")
+    st.caption("View registered employees. Deletion is restricted to Admin users.")
+
+    emp_data = load_all_encodings() # dict: emp_id -> (name, enc)
+    
+    if not emp_data:
+        st.info("No employees are currently registered.")
+    else:
+        emp_df_list = []
+        for emp_id, (name, _) in emp_data.items():
+            emp_df_list.append({"Employee ID": emp_id, "Name": name})
+        
+        emp_df = pd.DataFrame(emp_df_list)
+        st.dataframe(emp_df)
+
+
+# --- ADMIN PANEL (RESTRICTED ACCESS) ---
+
+with tab_admin:
+    st.header("🔑 Admin Panel")
+    st.caption("Full control over database management, including deletions.")
+
+    col_login, col_controls = st.columns([0.3, 0.7])
+    
+    with col_login:
+        st.markdown("### Admin Login")
+        if st.session_state.authenticated:
+            st.success(f"Welcome, {ADMIN_USER}! You have full control.")
+            if st.button("Logout", key="admin_logout_btn"):
+                st.session_state.authenticated = False
+                st.experimental_rerun()
+        else:
+            with st.form("admin_login_form_admin_tab", clear_on_submit=False):
+                username = st.text_input("Username", key="login_user_tab_admin")
+                password = st.text_input("Password", type="password", key="login_pass_tab_admin")
+                submitted = st.form_submit_button("Login")
+                
+                if submitted:
+                    if username == ADMIN_USER and password == ADMIN_PASS and ADMIN_USER and ADMIN_PASS:
+                        st.session_state.authenticated = True
+                        st.success("Logged in successfully!")
+                        st.experimental_rerun()
+                    else:
+                        st.error("Invalid Username or Password")
+            
+            st.info("Hint: Credentials are read from `.streamlit/secrets.toml`.")
+
+
+    with col_controls:
+        if not st.session_state.authenticated:
+            st.warning("Log in to the left to access data management controls.")
+        else:
+            # --- EMPLOYEE DATABASE MANAGEMENT ---
+            st.markdown("## 🗑️ Delete Employee Records")
+            st.caption("Permanently remove employee records (name, ID, face encoding). Violation history remains.")
+
+            emp_data = load_all_encodings() 
+            
+            if not emp_data:
+                st.info("No employees are currently registered to delete.")
+            else:
+                for emp_id, (name, _) in emp_data.items():
+                    col_emp1, col_emp2, col_emp3 = st.columns([0.3, 0.5, 0.2])
+                    with col_emp1:
+                        st.text(f"ID: {emp_id}")
+                    with col_emp2:
+                        st.text(f"Name: {name}")
+                    with col_emp3:
+                        if st.button("Delete Employee", key=f"del_emp_{emp_id}"):
+                            delete_employee(emp_id)
+                            st.toast(f"Employee {emp_id} deleted!", icon="🗑️")
+                            st.experimental_rerun()
+                
 # ---------------- Footer / Notes ----------------
 st.markdown("---")
 st.markdown(

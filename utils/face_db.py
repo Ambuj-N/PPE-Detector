@@ -1,5 +1,3 @@
-# utils/face_db.py
-
 import sqlite3
 import datetime
 import numpy as np
@@ -37,6 +35,9 @@ def setup_database():
             timestamp TEXT, 
             missing_items TEXT,
             image_blob BLOB,
+            -- FOREIGN KEY(employee_id) REFERENCES employees(employee_id) 
+            -- Note: We intentionally avoid ON DELETE CASCADE here so violation 
+            -- history remains even if an employee is deleted.
             FOREIGN KEY(employee_id) REFERENCES employees(employee_id)
         )
     ''')
@@ -136,5 +137,34 @@ def get_recent_violations(limit: int = 50) -> List[Dict[str, Any]]:
     conn.close()
     return logs
 
+# --- NEW ADMIN FUNCTIONS ---
+
+def delete_violation_entry(violation_id: int):
+    """Deletes a single violation entry by its primary key ID."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "DELETE FROM violations WHERE id = ?", 
+            (violation_id,)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+        
+
+def delete_employee(employee_id: str):
+    """Deletes an employee record (name and face encoding) by their employee_id."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "DELETE FROM employees WHERE employee_id = ?", 
+            (employee_id,)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+        
 # Execute the setup function on import
 setup_database()
